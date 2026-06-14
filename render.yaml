@@ -1,0 +1,39 @@
+# Render.com Service Configuration
+# Save this as render.yaml in your repository root
+
+services:
+  - type: web
+    name: amaba-backend
+    runtime: python
+    pythonVersion: 3.11
+    
+    # Build configuration
+    buildCommand: |
+      pip install --upgrade pip && 
+      pip install -r requirements.txt
+    
+    # Start command
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    
+    # Environment variables
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: true
+      - key: HOST
+        value: 0.0.0.0
+      - key: PORT
+        value: 8000
+    
+    # Health check
+    healthCheckPath: /health
+    
+    # Resource allocation
+    plan: standard
+    numInstances: 1
+    
+    # Scaling configuration
+    scaling:
+      minInstances: 1
+      maxInstances: 3
+      targetMemoryUtilization: 75
+      targetCpuUtilization: 70

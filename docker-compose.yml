@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  amaba-backend:
+    build: .
+    container_name: amaba-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - HOST=0.0.0.0
+      - PORT=8000
+      - ENVIRONMENT=development
+      - LOG_LEVEL=INFO
+    volumes:
+      - .:/app
+      - /app/__pycache__
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - amaba-network
+
+  # Optional: PostgreSQL Database (uncomment to enable)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: amaba-postgres
+  #   environment:
+  #     POSTGRES_USER: amaba
+  #     POSTGRES_PASSWORD: secure_password
+  #     POSTGRES_DB: amaba_db
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   networks:
+  #     - amaba-network
+
+networks:
+  amaba-network:
+    driver: bridge
+
+# volumes:
+#   postgres_data:
