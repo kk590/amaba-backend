@@ -19,12 +19,10 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies with potential fallback
-RUN pip install --no-cache-dir --upgrade pip
-
-# Try to install requirements, and if inference-client fails, install without version constraint
-RUN pip install --no-cache-dir -r requirements.txt || \
-    (pip install --no-cache-dir -r <(sed 's/inference-client>=0.8.0/inference-client/' requirements.txt))
+# Install Python dependencies
+# First upgrade pip, then install requirements. Handle potential conflicts outside Docker.
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
