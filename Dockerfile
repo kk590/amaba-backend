@@ -16,15 +16,14 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip, setuptools, wheel
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies with improved conflict resolution
-# Use --use-deprecated=legacy-resolver as a fallback for complex dependency trees
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir \
-    --use-deprecated=legacy-resolver \
-    -r requirements.txt
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
@@ -36,5 +35,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Run application
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Run application - CRITICAL: must bind to 0.0.0.0:8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
