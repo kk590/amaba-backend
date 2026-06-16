@@ -19,9 +19,12 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with improved conflict resolution
+# Use --use-deprecated=legacy-resolver as a fallback for complex dependency trees
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir \
+    --use-deprecated=legacy-resolver \
+    -r requirements.txt
 
 # Copy application code
 COPY . .
