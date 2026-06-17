@@ -5,12 +5,12 @@ pydantic==2.5.0
 python-dotenv==1.0.0
 
 # Smolagents - use compatible versions
-smolagents==0.1.0
-transformers==4.35.2
+smolagents==1.0.0
+transformers==4.36.0
 torch==2.1.1
 
-# Other AI/ML dependencies (adjust as needed)
-requests==2.31.0
+# Other AI/ML dependencies
+requests>=2.32.0
 httpx==0.25.0
 
 # Optional: for async support
