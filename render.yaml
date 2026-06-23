@@ -2,14 +2,14 @@ services:
   - type: web
     name: smolagents-api
     runtime: python
-    pythonVersion: 3.11
-    buildCommand: "pip install -r requirements.txt"
+    pythonVersion: "3.11.9"
+    buildCommand: "pip install --upgrade pip && pip install -r requirements.txt"
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     
     # Environment variables
     envVars:
       - key: PYTHON_VERSION
-        value: "3.11"
+        value: "3.11.9"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: HOST
