@@ -42,6 +42,46 @@ def _get_page():
 # Navigation tools
 # ===========================================================================
 
+from __future__ import annotations
+
+from typing import Any, Dict, List
+from smolagents import Tool
+from playwright.sync_api import sync_playwright, Page, Browser, Playwright, TimeoutError
+import logging
+
+logger = logging.getLogger(__name__)
+
+# --- Singleton Browser Manager ---
+class BrowserManager:
+    _instance = None
+    
+    def __init__(self):
+        self.playwright: Playwright = None
+        self.browser: Browser = None
+        self.page: Page = None
+        self._initialize()
+
+    def _initialize(self):
+        try:
+            self.playwright = sync_playwright().start()
+            self.browser = self.playwright.chromium.launch(headless=True)
+            context = self.browser.new_context()
+            self.page = context.new_page()
+            logger.info("Browser initialized successfully.")
+        except Exception as e:
+            logger.error(f"Failed to initialize browser: {e}")
+
+    @classmethod
+    def get_page(cls) -> Page:
+        if cls._instance is None:
+            cls._instance = BrowserManager()
+        return cls._instance.page
+
+# Initialize the global page getter
+def get_page() -> Page:
+    return BrowserManager.get_page()
+
+# --- Tools ---
 class OpenURLTool(Tool):
     name = "open_url"
     description = "Navigate to a URL and wait for the page to load."
@@ -55,6 +95,15 @@ class OpenURLTool(Tool):
         await page.wait_for_timeout(2000)
         return True
 
+    def forward(self, url: str):
+        page = get_page()
+        try:
+            page.goto(url)
+            page.wait_for_load_state("domcontentloaded")
+            page.wait_for_timeout(2000)
+            return True
+        except TimeoutError:
+            raise
 
 class WaitForLoadTool(Tool):
     name = "wait"
@@ -68,6 +117,11 @@ class WaitForLoadTool(Tool):
         return True
 
 
+    def forward(self):
+        page = get_page()
+        page.wait_for_load_state("networkidle")
+        return True
+
 class RefreshPageTool(Tool):
     name = "refresh_page"
     description = "Refresh/reload the current page."
@@ -80,6 +134,11 @@ class RefreshPageTool(Tool):
         return True
 
 
+    def forward(self):
+        page = get_page()
+        page.reload()
+        return True
+
 class GoBackTool(Tool):
     name = "go_back"
     description = "Navigate back to the previous page."
@@ -91,6 +150,11 @@ class GoBackTool(Tool):
         await page.go_back()
         return True
 
+
+    def forward(self):
+        page = get_page()
+        page.go_back()
+        return True
 
 class GoForwardTool(Tool):
     name = "go_forward"
@@ -119,6 +183,26 @@ class NewTabTool(Tool):
         await new_page.wait_for_timeout(2000)
         return new_page
 
+    def forward(self):
+        page = get_page()
+        page.go_forward()
+        return True
+
+class NewTabTool(Tool):
+    name = "new_tab"
+    description = "Open a new tab and navigate to the specified URL."
+    inputs = {"url": {"type": "string", "description": "Target URL"}}
+    output_type = "any"
+
+    def forward(self, url: str):
+        page = get_page()
+        context = page.context
+        new_page = context.new_page()
+        new_page.goto(url)
+        new_page.wait_for_load_state("domcontentloaded")
+        new_page.wait_for_timeout(2000)
+        BrowserManager._instance.page = new_page # Update active page
+        return True
 
 class SwitchTabTool(Tool):
     name = "switch_tab"
@@ -134,6 +218,15 @@ class SwitchTabTool(Tool):
             return True
         return False
 
+
+    def forward(self, index: int):
+        page = get_page()
+        pages = page.context.pages
+        if index < len(pages):
+            pages[index].bring_to_front()
+            BrowserManager._instance.page = pages[index]
+            return True
+        return False
 
 class CloseTabTool(Tool):
     name = "close_tab"
@@ -151,6 +244,15 @@ class CloseTabTool(Tool):
 # Interaction tools
 # ===========================================================================
 
+    def forward(self):
+        page = get_page()
+        page.close()
+        # Fallback to the last open page
+        pages = page.context.pages
+        if pages:
+            BrowserManager._instance.page = pages[-1]
+        return True
+
 class ClickTool(Tool):
     name = "click"
     description = "Click an element by selector."
@@ -162,6 +264,11 @@ class ClickTool(Tool):
         await page.click(selector)
         return True
 
+
+    def forward(self, selector: str):
+        page = get_page()
+        page.click(selector)
+        return True
 
 class FillTool(Tool):
     name = "fill"
@@ -180,6 +287,13 @@ class FillTool(Tool):
         return True
 
 
+    def forward(self, selector: str, text: str):
+        page = get_page()
+        locator = page.locator(selector)
+        locator.click(timeout=10000)
+        locator.fill(text)
+        return True
+
 class PressTool(Tool):
     name = "press"
     description = "Press a specific key on an element."
@@ -195,6 +309,11 @@ class PressTool(Tool):
         return True
 
 
+    def forward(self, selector: str, key: str):
+        page = get_page()
+        page.press(selector, key)
+        return True
+
 class ScrollTool(Tool):
     name = "scroll"
     description = "Scroll the page down by a given pixel amount."
@@ -208,6 +327,11 @@ class ScrollTool(Tool):
         await page.evaluate(f"window.scrollBy(0, {amount});")
         return True
 
+
+    def forward(self, amount: int = 2000):
+        page = get_page()
+        page.evaluate(f"window.scrollBy(0, {amount});")
+        return True
 
 class HoverTool(Tool):
     name = "hover"
@@ -225,6 +349,11 @@ class HoverTool(Tool):
 # Extraction tools
 # ===========================================================================
 
+    def forward(self, selector: str):
+        page = get_page()
+        page.hover(selector)
+        return True
+
 class ExtractTextTool(Tool):
     name = "extract_text"
     description = "Extract text content from an element selector."
@@ -235,6 +364,9 @@ class ExtractTextTool(Tool):
         page = _get_page()
         return await page.locator(selector).inner_text()
 
+    def forward(self, selector: str) -> str:
+        page = get_page()
+        return page.locator(selector).inner_text()
 
 class ExtractLinksTool(Tool):
     name = "extract_links"
@@ -249,6 +381,13 @@ class ExtractLinksTool(Tool):
         links: list[str] = []
         for element in elements:
             href = await element.get_attribute("href")
+    def forward(self, selector: str) -> List[str]:
+        page = get_page()
+        locator = page.locator(selector)
+        elements = locator.element_handles()
+        links = []
+        for element in elements:
+            href = element.get_attribute("href")
             if href:
                 links.append(href)
         return links
@@ -264,6 +403,9 @@ class ExtractTableTool(Tool):
         page = _get_page()
         return await page.locator(selector).inner_text()
 
+    def forward(self, selector: str) -> str:
+        page = get_page()
+        return page.locator(selector).inner_text()
 
 class ExtractFormFieldsTool(Tool):
     name = "extract_form_fields"
@@ -283,6 +425,17 @@ class ExtractFormFieldsTool(Tool):
         return fields
 
 
+    def forward(self, selector: str) -> Dict[str, str]:
+        page = get_page()
+        container = page.locator(selector)
+        inputs = container.locator("input").all()
+        fields = {}
+        for i, inp in enumerate(inputs):
+            name = inp.get_attribute("name")
+            value = inp.input_value()
+            fields[name or f"input_{i}"] = value
+        return fields
+
 class ExtractPageTitleTool(Tool):
     name = "extract_page_title"
     description = "Get the current page title."
@@ -293,6 +446,9 @@ class ExtractPageTitleTool(Tool):
         page = _get_page()
         return await page.title()
 
+    def forward(self) -> str:
+        page = get_page()
+        return page.title()
 
 class GetCurrentURLTool(Tool):
     name = "get_current_url"
@@ -304,6 +460,10 @@ class GetCurrentURLTool(Tool):
         page = _get_page()
         return page.url
 
+
+    def forward(self) -> str:
+        page = get_page()
+        return page.url
 
 class TakeScreenshotTool(Tool):
     name = "take_screenshot"
@@ -320,6 +480,13 @@ class TakeScreenshotTool(Tool):
 # ===========================================================================
 # Recovery tools (placeholders)
 # ===========================================================================
+    def forward(self, path: str):
+        page = get_page()
+        page.screenshot(path=path)
+        return True
+
+
+# --- Placeholders for recovery/debug/critique tools referenced by main.py ---
 
 class RetryActionTool(Tool):
     name = "retry_action"
@@ -330,6 +497,7 @@ class RetryActionTool(Tool):
     async def forward(self):
         return "retry_action_placeholder"
 
+    def forward(self): return "retry_action_placeholder"
 
 class CaptureFailureScreenshotTool(Tool):
     name = "capture_failure_screenshot"
@@ -340,6 +508,7 @@ class CaptureFailureScreenshotTool(Tool):
     async def forward(self):
         return "capture_failure_screenshot_placeholder"
 
+    def forward(self): return "capture_failure_screenshot_placeholder"
 
 class AlternativeSelectorTool(Tool):
     name = "alternative_selector"
@@ -350,6 +519,7 @@ class AlternativeSelectorTool(Tool):
     async def forward(self):
         return "alternative_selector_placeholder"
 
+    def forward(self): return "alternative_selector_placeholder"
 
 class RestartBrowserTool(Tool):
     name = "restart_browser"
@@ -360,6 +530,7 @@ class RestartBrowserTool(Tool):
     async def forward(self):
         return "restart_browser_placeholder"
 
+    def forward(self): return "restart_browser_placeholder"
 
 class ReopenTabTool(Tool):
     name = "reopen_tab"
@@ -370,6 +541,7 @@ class ReopenTabTool(Tool):
     async def forward(self):
         return "reopen_tab_placeholder"
 
+    def forward(self): return "reopen_tab_placeholder"
 
 class GetLastErrorTool(Tool):
     name = "get_last_error"
@@ -380,6 +552,7 @@ class GetLastErrorTool(Tool):
     async def forward(self):
         return "get_last_error_placeholder"
 
+    def forward(self): return "get_last_error_placeholder"
 
 class GetLastActionTool(Tool):
     name = "get_last_action"
@@ -390,6 +563,7 @@ class GetLastActionTool(Tool):
     async def forward(self):
         return "get_last_action_placeholder"
 
+    def forward(self): return "get_last_action_placeholder"
 
 class GetCurrentPageSnapshotTool(Tool):
     name = "get_current_page_snapshot"
@@ -404,6 +578,7 @@ class GetCurrentPageSnapshotTool(Tool):
 # ===========================================================================
 # Debug tools (placeholders)
 # ===========================================================================
+    def forward(self): return "get_current_page_snapshot_placeholder"
 
 class ReadConsoleLogsTool(Tool):
     name = "read_console_logs"
@@ -414,6 +589,7 @@ class ReadConsoleLogsTool(Tool):
     async def forward(self):
         return "read_console_logs_placeholder"
 
+    def forward(self): return "read_console_logs_placeholder"
 
 class ReadNetworkLogsTool(Tool):
     name = "read_network_logs"
@@ -424,6 +600,7 @@ class ReadNetworkLogsTool(Tool):
     async def forward(self):
         return "read_network_logs_placeholder"
 
+    def forward(self): return "read_network_logs_placeholder"
 
 class InspectDOMTool(Tool):
     name = "inspect_dom"
@@ -434,6 +611,7 @@ class InspectDOMTool(Tool):
     async def forward(self):
         return "inspect_dom_placeholder"
 
+    def forward(self): return "inspect_dom_placeholder"
 
 class AnalyzeStacktraceTool(Tool):
     name = "analyze_stacktrace"
@@ -444,6 +622,7 @@ class AnalyzeStacktraceTool(Tool):
     async def forward(self):
         return "analyze_stacktrace_placeholder"
 
+    def forward(self): return "analyze_stacktrace_placeholder"
 
 class FindBrokenSelectorTool(Tool):
     name = "find_broken_selector"
@@ -454,6 +633,7 @@ class FindBrokenSelectorTool(Tool):
     async def forward(self):
         return "find_broken_selector_placeholder"
 
+    def forward(self): return "find_broken_selector_placeholder"
 
 class AnalyzePlaywrightErrorTool(Tool):
     name = "analyze_playwright_error"
@@ -464,6 +644,7 @@ class AnalyzePlaywrightErrorTool(Tool):
     async def forward(self):
         return "analyze_playwright_error_placeholder"
 
+    def forward(self): return "analyze_playwright_error_placeholder"
 
 class GenerateFixTool(Tool):
     name = "generate_fix"
@@ -474,6 +655,7 @@ class GenerateFixTool(Tool):
     async def forward(self):
         return "generate_fix_placeholder"
 
+    def forward(self): return "generate_fix_placeholder"
 
 class GenerateSelectorTool(Tool):
     name = "generate_selector"
@@ -484,6 +666,7 @@ class GenerateSelectorTool(Tool):
     async def forward(self):
         return "generate_selector_placeholder"
 
+    def forward(self): return "generate_selector_placeholder"
 
 class ExplainErrorTool(Tool):
     name = "explain_error"
@@ -498,6 +681,7 @@ class ExplainErrorTool(Tool):
 # ===========================================================================
 # Critique / Verification tools (placeholders)
 # ===========================================================================
+    def forward(self): return "explain_error_placeholder"
 
 class VerifyURLTool(Tool):
     name = "verify_url"
@@ -508,6 +692,7 @@ class VerifyURLTool(Tool):
     async def forward(self, expected_url: str):
         return "verify_url_placeholder"
 
+    def forward(self, expected_url: str): return "verify_url_placeholder"
 
 class VerifyTitleTool(Tool):
     name = "verify_title"
@@ -518,6 +703,7 @@ class VerifyTitleTool(Tool):
     async def forward(self, expected_title: str):
         return "verify_title_placeholder"
 
+    def forward(self, expected_title: str): return "verify_title_placeholder"
 
 class VerifyTextExistsTool(Tool):
     name = "verify_text_exists"
@@ -531,6 +717,7 @@ class VerifyTextExistsTool(Tool):
     async def forward(self, selector: str, expected_text: str):
         return "verify_text_exists_placeholder"
 
+    def forward(self, selector: str, expected_text: str): return "verify_text_exists_placeholder"
 
 class VerifyElementExistsTool(Tool):
     name = "verify_element_exists"
@@ -541,6 +728,7 @@ class VerifyElementExistsTool(Tool):
     async def forward(self, selector: str):
         return "verify_element_exists_placeholder"
 
+    def forward(self, selector: str): return "verify_element_exists_placeholder"
 
 class VerifyPageLoadedTool(Tool):
     name = "verify_page_loaded"
@@ -551,6 +739,7 @@ class VerifyPageLoadedTool(Tool):
     async def forward(self):
         return "verify_page_loaded_placeholder"
 
+    def forward(self): return "verify_page_loaded_placeholder"
 
 class VerifyTaskCompletionTool(Tool):
     name = "verify_task_completion"
@@ -561,6 +750,7 @@ class VerifyTaskCompletionTool(Tool):
     async def forward(self):
         return "verify_task_completion_placeholder"
 
+    def forward(self): return "verify_task_completion_placeholder"
 
 class CompareExpectedVsActualTool(Tool):
     name = "compare_expected_vs_actual"
@@ -571,6 +761,7 @@ class CompareExpectedVsActualTool(Tool):
     async def forward(self):
         return "compare_expected_vs_actual_placeholder"
 
+    def forward(self): return "compare_expected_vs_actual_placeholder"
 
 class ValidateExtractedDataTool(Tool):
     name = "validate_extracted_data"
@@ -581,6 +772,7 @@ class ValidateExtractedDataTool(Tool):
     async def forward(self):
         return "validate_extracted_data_placeholder"
 
+    def forward(self): return "validate_extracted_data_placeholder"
 
 class ValidateOutputQualityTool(Tool):
     name = "validate_output_quality"
@@ -597,6 +789,10 @@ class ValidateOutputQualityTool(Tool):
 # ===========================================================================
 
 # Navigation
+    def forward(self): return "validate_output_quality_placeholder"
+
+
+# Instantiate tools with the variable names main.py expects
 open_url = OpenURLTool()
 wait_for_load = WaitForLoadTool()
 wait = WaitForLoadTool()

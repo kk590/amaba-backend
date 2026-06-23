@@ -10,6 +10,7 @@ managed agents as long as they have a `name` and `description` set.
 
 from smolagents import CodeAgent
 from smolagents import InferenceClientModel
+from smolagents.models import InferenceClientModel
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime
@@ -20,7 +21,7 @@ logger = logging.getLogger(__name__)
 # MODELS
 # =========================
 ceo_model = InferenceClientModel(
-    model_id="Qwen/Qwen3-8B-Instruct"
+    model_id="Qwen/Qwen2.5-72B-Instruct"
 )
 browser_model = InferenceClientModel(
     model_id="microsoft/Phi-4-mini-instruct"
@@ -126,6 +127,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
+        self.agents['browser'] = browser_manager
 
         # Recovery Manager
         recovery_tools = [retry_action, refresh_page] if TOOLS_AVAILABLE else []
@@ -140,6 +142,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
+        self.agents['recovery'] = recovery_manager
 
         # Debug Manager
         self.agents['debug'] = CodeAgent(
@@ -152,6 +155,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
+        self.agents['debug'] = debug_manager
 
         # Critique Manager
         critique_tools = [verify_url, verify_text_exists] if TOOLS_AVAILABLE else []
@@ -167,6 +171,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
+        self.agents['critique'] = critique_manager
 
         # CEO Orchestrator - sub-agents are passed directly as managed_agents
         # since each already has a `name` and `description`.
@@ -310,6 +315,7 @@ if __name__ == "__main__":
     print(f"\n{'='*60}")
     print(f"Task ID: {result.task_id}")
     print(f"Status: {'SUCCESS' if result.success else 'FAILED'}")
+    print(f"Status: {'[SUCCESS]' if result.success else '[FAILED]'}")
     print(f"Duration: {result.duration:.2f}s")
     if result.error:
         print(f"Error: {result.error}")
