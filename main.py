@@ -52,13 +52,50 @@ except Exception as e:
     )
     logger.error("Server will start in API-only mode (orchestration disabled).")
 
+from contextlib import asynccontextmanager
+
+# ============================================================================
+# Lifespan (replaces deprecated @app.on_event)
+# ============================================================================
+
+@asynccontextmanager
+async def lifespan(application):
+    """Startup / shutdown lifecycle for the FastAPI app."""
+    global orchestrator
+
+    logger.info("=" * 60)
+    logger.info("AMABA Dashboard Backend Starting...")
+    logger.info("=" * 60)
+
+    if ORCHESTRATION_AVAILABLE:
+        try:
+            config = OrchestratorConfig()
+            init_orchestrator(config)
+            orchestrator = get_orchestrator()
+            logger.info("✅ Agent Orchestration System: Initialized")
+        except Exception as e:
+            logger.warning(f"⚠️  Orchestration system failed to initialize: {e}")
+            logger.warning("   Backend will run in API-only mode")
+    else:
+        logger.warning("⚠️  Orchestration module unavailable (import failed at startup)")
+        logger.warning("   Backend will run in API-only mode")
+
+    logger.info("✅ API Server: Running")
+    logger.info("📚 API Docs: /docs")
+    logger.info("🔍 ReDoc: /redoc")
+    logger.info("=" * 60)
+
+    yield  # App is running
+
+    logger.info("AMABA Dashboard Backend Shutting Down...")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="AMABA Dashboard API",
     description="Multi-Agent Autonomous Browser Automation Backend",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
-
 # Enable CORS for extension communication
 app.add_middleware(
     CORSMiddleware,
@@ -135,44 +172,8 @@ METRICS = {
     "error_rate": 0.13
 }
 
-# Initialize orchestrator
+# Initialize orchestrator reference (set during lifespan startup)
 orchestrator = None
-
-# ============================================================================
-# Startup Event
-# ============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize when server starts"""
-    global orchestrator
-
-    logger.info("=" * 60)
-    logger.info("AMABA Dashboard Backend Starting...")
-    logger.info("=" * 60)
-
-    if ORCHESTRATION_AVAILABLE:
-        try:
-            config = OrchestratorConfig()
-            init_orchestrator(config)
-            orchestrator = get_orchestrator()
-            logger.info("✅ Agent Orchestration System: Initialized")
-        except Exception as e:
-            logger.warning(f"⚠️  Orchestration system failed to initialize: {e}")
-            logger.warning("   Backend will run in API-only mode")
-    else:
-        logger.warning("⚠️  Orchestration module unavailable (import failed at startup)")
-        logger.warning("   Backend will run in API-only mode")
-
-    logger.info("✅ API Server: Running")
-    logger.info("📚 API Docs: /docs")
-    logger.info("🔍 ReDoc: /redoc")
-    logger.info("=" * 60)
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup when server shuts down"""
-    logger.info("AMABA Dashboard Backend Shutting Down...")
 
 # ============================================================================
 # Health & Status Endpoints

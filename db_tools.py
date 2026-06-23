@@ -1,5 +1,5 @@
 import json
-import asyncio
+import time
 from typing import Dict, Any
 
 from smolagents import Tool
@@ -11,7 +11,7 @@ artifacts_db: Dict[str, Dict[str, Any]] = {}
 
 
 def _now():
-    return asyncio.get_event_loop().time()
+    return time.time()
 
 
 class CreateTaskTool(Tool):

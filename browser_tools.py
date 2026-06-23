@@ -1,14 +1,46 @@
+"""
+AMABA Browser Automation Tools
+
+smolagents Tool subclasses for Playwright-based browser automation.
+
+IMPORTANT — smolagents >= 1.14 validates that Tool.forward() parameters
+(after self) match exactly the keys of the class-level `inputs` dict.
+Therefore tools that need a Playwright Page must NOT accept it as a forward()
+argument. Instead they access a module-level `_page` reference that is set
+externally before the agent runs.
+"""
+
 from __future__ import annotations
 
 from typing import Any
 
-from playwright.async_api import Page, TimeoutError
 from smolagents import Tool
 
+# ---------------------------------------------------------------------------
+# Module-level page reference.  Set this BEFORE invoking any agent that uses
+# these tools, e.g.:  browser_tools._page = await context.new_page()
+# ---------------------------------------------------------------------------
+_page = None
 
-# Note: Your installed smolagents version (1.26.0) requires Tool subclasses to
-# define class attributes: name, description, inputs, output_type.
 
+def set_page(page):
+    """Set the shared Playwright Page reference used by all tools."""
+    global _page
+    _page = page
+
+
+def _get_page():
+    """Return the current page, raising if unset."""
+    if _page is None:
+        raise RuntimeError(
+            "Playwright page not initialised. Call browser_tools.set_page(page) first."
+        )
+    return _page
+
+
+# ===========================================================================
+# Navigation tools
+# ===========================================================================
 
 class OpenURLTool(Tool):
     name = "open_url"
@@ -17,26 +49,23 @@ class OpenURLTool(Tool):
     output_type = "any"
 
     async def forward(self, url: str):
-
-        try:
-            await page.goto(url)
-            await page.wait_for_load_state("domcontentloaded")
-            await page.wait_for_timeout(2000)
-            return True
-        except TimeoutError:
-            raise
+        page = _get_page()
+        await page.goto(url)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_timeout(2000)
+        return True
 
 
 class WaitForLoadTool(Tool):
     name = "wait"
     description = "Wait for the page to reach network idle state."
-    inputs = {"page": {"type": "any", "description": "Playwright Page"}}
+    inputs = {}
     output_type = "any"
 
-    async def forward(self, page: Page):
+    async def forward(self):
+        page = _get_page()
         await page.wait_for_load_state("networkidle")
         return True
-
 
 
 class RefreshPageTool(Tool):
@@ -45,7 +74,8 @@ class RefreshPageTool(Tool):
     inputs = {}
     output_type = "any"
 
-    async def forward(self, page: Page):
+    async def forward(self):
+        page = _get_page()
         await page.reload()
         return True
 
@@ -56,7 +86,8 @@ class GoBackTool(Tool):
     inputs = {}
     output_type = "any"
 
-    async def forward(self, page: Page):
+    async def forward(self):
+        page = _get_page()
         await page.go_back()
         return True
 
@@ -67,7 +98,8 @@ class GoForwardTool(Tool):
     inputs = {}
     output_type = "any"
 
-    async def forward(self, page: Page):
+    async def forward(self):
+        page = _get_page()
         await page.go_forward()
         return True
 
@@ -78,7 +110,8 @@ class NewTabTool(Tool):
     inputs = {"url": {"type": "string", "description": "Target URL"}}
     output_type = "any"
 
-    async def forward(self, page: Page, url: str):
+    async def forward(self, url: str):
+        page = _get_page()
         context = page.context
         new_page = await context.new_page()
         await new_page.goto(url)
@@ -93,7 +126,8 @@ class SwitchTabTool(Tool):
     inputs = {"index": {"type": "number", "description": "Tab index"}}
     output_type = "any"
 
-    async def forward(self, page: Page, index: int):
+    async def forward(self, index: int):
+        page = _get_page()
         pages = page.context.pages
         if index < len(pages):
             await pages[index].bring_to_front()
@@ -107,10 +141,15 @@ class CloseTabTool(Tool):
     inputs = {}
     output_type = "any"
 
-    async def forward(self, page: Page):
+    async def forward(self):
+        page = _get_page()
         await page.close()
         return True
 
+
+# ===========================================================================
+# Interaction tools
+# ===========================================================================
 
 class ClickTool(Tool):
     name = "click"
@@ -118,7 +157,8 @@ class ClickTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "any"
 
-    async def forward(self, page: Page, selector: str):
+    async def forward(self, selector: str):
+        page = _get_page()
         await page.click(selector)
         return True
 
@@ -132,7 +172,8 @@ class FillTool(Tool):
     }
     output_type = "any"
 
-    async def forward(self, page: Page, selector: str, text: str):
+    async def forward(self, selector: str, text: str):
+        page = _get_page()
         locator = page.locator(selector)
         await locator.click(timeout=10000)
         await locator.fill(text)
@@ -148,7 +189,8 @@ class PressTool(Tool):
     }
     output_type = "any"
 
-    async def forward(self, page: Page, selector: str, key: str):
+    async def forward(self, selector: str, key: str):
+        page = _get_page()
         await page.press(selector, key)
         return True
 
@@ -156,10 +198,13 @@ class PressTool(Tool):
 class ScrollTool(Tool):
     name = "scroll"
     description = "Scroll the page down by a given pixel amount."
-    inputs = {"amount": {"type": "number", "description": "Scroll amount (px)"}}
+    inputs = {"amount": {"type": "number", "description": "Scroll amount (px)", "nullable": True}}
     output_type = "any"
 
-    async def forward(self, page: Page, amount: int = 2000):
+    async def forward(self, amount: int = None):
+        page = _get_page()
+        if amount is None:
+            amount = 2000
         await page.evaluate(f"window.scrollBy(0, {amount});")
         return True
 
@@ -170,10 +215,15 @@ class HoverTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "any"
 
-    async def forward(self, page: Page, selector: str):
+    async def forward(self, selector: str):
+        page = _get_page()
         await page.hover(selector)
         return True
 
+
+# ===========================================================================
+# Extraction tools
+# ===========================================================================
 
 class ExtractTextTool(Tool):
     name = "extract_text"
@@ -181,7 +231,8 @@ class ExtractTextTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "string"
 
-    async def forward(self, page: Page, selector: str) -> str:
+    async def forward(self, selector: str) -> str:
+        page = _get_page()
         return await page.locator(selector).inner_text()
 
 
@@ -191,7 +242,8 @@ class ExtractLinksTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "any"
 
-    async def forward(self, page: Page, selector: str) -> list[str]:
+    async def forward(self, selector: str) -> list[str]:
+        page = _get_page()
         locator = page.locator(selector)
         elements = await locator.element_handles()
         links: list[str] = []
@@ -208,7 +260,8 @@ class ExtractTableTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Table selector"}}
     output_type = "string"
 
-    async def forward(self, page: Page, selector: str) -> str:
+    async def forward(self, selector: str) -> str:
+        page = _get_page()
         return await page.locator(selector).inner_text()
 
 
@@ -218,11 +271,12 @@ class ExtractFormFieldsTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Container selector"}}
     output_type = "any"
 
-    async def forward(self, page: Page, selector: str) -> dict[str, str]:
+    async def forward(self, selector: str) -> dict[str, str]:
+        page = _get_page()
         container = page.locator(selector)
-        inputs = await container.locator("input").all()
+        input_elements = await container.locator("input").all()
         fields: dict[str, str] = {}
-        for i, inp in enumerate(inputs):
+        for i, inp in enumerate(input_elements):
             name = await inp.get_attribute("name")
             value = await inp.input_value()
             fields[name or f"input_{i}"] = value
@@ -235,7 +289,8 @@ class ExtractPageTitleTool(Tool):
     inputs = {}
     output_type = "string"
 
-    async def forward(self, page: Page) -> str:
+    async def forward(self) -> str:
+        page = _get_page()
         return await page.title()
 
 
@@ -245,7 +300,8 @@ class GetCurrentURLTool(Tool):
     inputs = {}
     output_type = "string"
 
-    async def forward(self, page: Page) -> str:
+    async def forward(self) -> str:
+        page = _get_page()
         return page.url
 
 
@@ -255,13 +311,15 @@ class TakeScreenshotTool(Tool):
     inputs = {"path": {"type": "string", "description": "Output file path"}}
     output_type = "any"
 
-    async def forward(self, page: Page, path: str):
+    async def forward(self, path: str):
+        page = _get_page()
         await page.screenshot(path=path)
         return True
 
 
-# --- Placeholders for recovery/debug/critique tools referenced by main.py ---
-
+# ===========================================================================
+# Recovery tools (placeholders)
+# ===========================================================================
 
 class RetryActionTool(Tool):
     name = "retry_action"
@@ -342,6 +400,10 @@ class GetCurrentPageSnapshotTool(Tool):
     async def forward(self):
         return "get_current_page_snapshot_placeholder"
 
+
+# ===========================================================================
+# Debug tools (placeholders)
+# ===========================================================================
 
 class ReadConsoleLogsTool(Tool):
     name = "read_console_logs"
@@ -432,6 +494,10 @@ class ExplainErrorTool(Tool):
     async def forward(self):
         return "explain_error_placeholder"
 
+
+# ===========================================================================
+# Critique / Verification tools (placeholders)
+# ===========================================================================
 
 class VerifyURLTool(Tool):
     name = "verify_url"
@@ -526,7 +592,11 @@ class ValidateOutputQualityTool(Tool):
         return "validate_output_quality_placeholder"
 
 
-# Instantiate tools with the variable names main.py expects
+# ===========================================================================
+# Instantiate tools with the variable names orchestration.py expects
+# ===========================================================================
+
+# Navigation
 open_url = OpenURLTool()
 wait_for_load = WaitForLoadTool()
 wait = WaitForLoadTool()
@@ -536,11 +606,15 @@ go_forward = GoForwardTool()
 new_tab = NewTabTool()
 switch_tab = SwitchTabTool()
 close_tab = CloseTabTool()
+
+# Interaction
 click = ClickTool()
 fill = FillTool()
 press = PressTool()
 scroll = ScrollTool()
 hover = HoverTool()
+
+# Extraction
 extract_text = ExtractTextTool()
 extract_links = ExtractLinksTool()
 extract_table = ExtractTableTool()
@@ -580,4 +654,3 @@ verify_task_completion = VerifyTaskCompletionTool()
 compare_expected_vs_actual = CompareExpectedVsActualTool()
 validate_extracted_data = ValidateExtractedDataTool()
 validate_output_quality = ValidateOutputQualityTool()
-

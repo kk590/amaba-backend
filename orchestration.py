@@ -9,7 +9,7 @@ managed agents as long as they have a `name` and `description` set.
 """
 
 from smolagents import CodeAgent
-from smolagents.models import InferenceClientModel
+from smolagents import InferenceClientModel
 import logging
 from typing import Optional, Dict, Any
 from datetime import datetime

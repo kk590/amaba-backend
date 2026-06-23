@@ -16,14 +16,17 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Upgrade pip, setuptools, wheel
-RUN pip install --no-cache-dir torch==2.1.1 --index-url https://download.pytorch.org/whl/cpu
+# Upgrade pip
+RUN pip install --no-cache-dir --upgrade pip
 
 # Copy requirements
 COPY requirements.txt .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright browsers (chromium only, for browser automation)
+RUN playwright install --with-deps chromium
 
 # Copy application code
 COPY . .
