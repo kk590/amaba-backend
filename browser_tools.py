@@ -1,3 +1,47 @@
+"""
+AMABA Browser Automation Tools
+
+smolagents Tool subclasses for Playwright-based browser automation.
+
+IMPORTANT — smolagents >= 1.14 validates that Tool.forward() parameters
+(after self) match exactly the keys of the class-level `inputs` dict.
+Therefore tools that need a Playwright Page must NOT accept it as a forward()
+argument. Instead they access a module-level `_page` reference that is set
+externally before the agent runs.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from smolagents import Tool
+
+# ---------------------------------------------------------------------------
+# Module-level page reference.  Set this BEFORE invoking any agent that uses
+# these tools, e.g.:  browser_tools._page = await context.new_page()
+# ---------------------------------------------------------------------------
+_page = None
+
+
+def set_page(page):
+    """Set the shared Playwright Page reference used by all tools."""
+    global _page
+    _page = page
+
+
+def _get_page():
+    """Return the current page, raising if unset."""
+    if _page is None:
+        raise RuntimeError(
+            "Playwright page not initialised. Call browser_tools.set_page(page) first."
+        )
+    return _page
+
+
+# ===========================================================================
+# Navigation tools
+# ===========================================================================
+
 from __future__ import annotations
 
 from typing import Any, Dict, List
@@ -44,6 +88,13 @@ class OpenURLTool(Tool):
     inputs = {"url": {"type": "string", "description": "Target URL"}}
     output_type = "any"
 
+    async def forward(self, url: str):
+        page = _get_page()
+        await page.goto(url)
+        await page.wait_for_load_state("domcontentloaded")
+        await page.wait_for_timeout(2000)
+        return True
+
     def forward(self, url: str):
         page = get_page()
         try:
@@ -60,6 +111,12 @@ class WaitForLoadTool(Tool):
     inputs = {}
     output_type = "any"
 
+    async def forward(self):
+        page = _get_page()
+        await page.wait_for_load_state("networkidle")
+        return True
+
+
     def forward(self):
         page = get_page()
         page.wait_for_load_state("networkidle")
@@ -70,6 +127,12 @@ class RefreshPageTool(Tool):
     description = "Refresh/reload the current page."
     inputs = {}
     output_type = "any"
+
+    async def forward(self):
+        page = _get_page()
+        await page.reload()
+        return True
+
 
     def forward(self):
         page = get_page()
@@ -82,6 +145,12 @@ class GoBackTool(Tool):
     inputs = {}
     output_type = "any"
 
+    async def forward(self):
+        page = _get_page()
+        await page.go_back()
+        return True
+
+
     def forward(self):
         page = get_page()
         page.go_back()
@@ -92,6 +161,27 @@ class GoForwardTool(Tool):
     description = "Navigate forward to the next page."
     inputs = {}
     output_type = "any"
+
+    async def forward(self):
+        page = _get_page()
+        await page.go_forward()
+        return True
+
+
+class NewTabTool(Tool):
+    name = "new_tab"
+    description = "Open a new tab and navigate to the specified URL. Returns the new Page."
+    inputs = {"url": {"type": "string", "description": "Target URL"}}
+    output_type = "any"
+
+    async def forward(self, url: str):
+        page = _get_page()
+        context = page.context
+        new_page = await context.new_page()
+        await new_page.goto(url)
+        await new_page.wait_for_load_state("domcontentloaded")
+        await new_page.wait_for_timeout(2000)
+        return new_page
 
     def forward(self):
         page = get_page()
@@ -120,6 +210,15 @@ class SwitchTabTool(Tool):
     inputs = {"index": {"type": "number", "description": "Tab index"}}
     output_type = "any"
 
+    async def forward(self, index: int):
+        page = _get_page()
+        pages = page.context.pages
+        if index < len(pages):
+            await pages[index].bring_to_front()
+            return True
+        return False
+
+
     def forward(self, index: int):
         page = get_page()
         pages = page.context.pages
@@ -134,6 +233,16 @@ class CloseTabTool(Tool):
     description = "Close the current tab/page."
     inputs = {}
     output_type = "any"
+
+    async def forward(self):
+        page = _get_page()
+        await page.close()
+        return True
+
+
+# ===========================================================================
+# Interaction tools
+# ===========================================================================
 
     def forward(self):
         page = get_page()
@@ -150,6 +259,12 @@ class ClickTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "any"
 
+    async def forward(self, selector: str):
+        page = _get_page()
+        await page.click(selector)
+        return True
+
+
     def forward(self, selector: str):
         page = get_page()
         page.click(selector)
@@ -163,6 +278,14 @@ class FillTool(Tool):
         "text": {"type": "string", "description": "Text to enter"},
     }
     output_type = "any"
+
+    async def forward(self, selector: str, text: str):
+        page = _get_page()
+        locator = page.locator(selector)
+        await locator.click(timeout=10000)
+        await locator.fill(text)
+        return True
+
 
     def forward(self, selector: str, text: str):
         page = get_page()
@@ -180,6 +303,12 @@ class PressTool(Tool):
     }
     output_type = "any"
 
+    async def forward(self, selector: str, key: str):
+        page = _get_page()
+        await page.press(selector, key)
+        return True
+
+
     def forward(self, selector: str, key: str):
         page = get_page()
         page.press(selector, key)
@@ -190,6 +319,14 @@ class ScrollTool(Tool):
     description = "Scroll the page down by a given pixel amount."
     inputs = {"amount": {"type": "number", "description": "Scroll amount (px)", "nullable": True}}
     output_type = "any"
+
+    async def forward(self, amount: int = None):
+        page = _get_page()
+        if amount is None:
+            amount = 2000
+        await page.evaluate(f"window.scrollBy(0, {amount});")
+        return True
+
 
     def forward(self, amount: int = 2000):
         page = get_page()
@@ -202,6 +339,16 @@ class HoverTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "any"
 
+    async def forward(self, selector: str):
+        page = _get_page()
+        await page.hover(selector)
+        return True
+
+
+# ===========================================================================
+# Extraction tools
+# ===========================================================================
+
     def forward(self, selector: str):
         page = get_page()
         page.hover(selector)
@@ -213,6 +360,10 @@ class ExtractTextTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "string"
 
+    async def forward(self, selector: str) -> str:
+        page = _get_page()
+        return await page.locator(selector).inner_text()
+
     def forward(self, selector: str) -> str:
         page = get_page()
         return page.locator(selector).inner_text()
@@ -223,6 +374,13 @@ class ExtractLinksTool(Tool):
     inputs = {"selector": {"type": "string", "description": "Element selector"}}
     output_type = "any"
 
+    async def forward(self, selector: str) -> list[str]:
+        page = _get_page()
+        locator = page.locator(selector)
+        elements = await locator.element_handles()
+        links: list[str] = []
+        for element in elements:
+            href = await element.get_attribute("href")
     def forward(self, selector: str) -> List[str]:
         page = get_page()
         locator = page.locator(selector)
@@ -234,11 +392,16 @@ class ExtractLinksTool(Tool):
                 links.append(href)
         return links
 
+
 class ExtractTableTool(Tool):
     name = "extract_table"
     description = "Extract table content as text."
     inputs = {"selector": {"type": "string", "description": "Table selector"}}
     output_type = "string"
+
+    async def forward(self, selector: str) -> str:
+        page = _get_page()
+        return await page.locator(selector).inner_text()
 
     def forward(self, selector: str) -> str:
         page = get_page()
@@ -249,6 +412,18 @@ class ExtractFormFieldsTool(Tool):
     description = "Extract basic form field values under a container selector."
     inputs = {"selector": {"type": "string", "description": "Container selector"}}
     output_type = "any"
+
+    async def forward(self, selector: str) -> dict[str, str]:
+        page = _get_page()
+        container = page.locator(selector)
+        input_elements = await container.locator("input").all()
+        fields: dict[str, str] = {}
+        for i, inp in enumerate(input_elements):
+            name = await inp.get_attribute("name")
+            value = await inp.input_value()
+            fields[name or f"input_{i}"] = value
+        return fields
+
 
     def forward(self, selector: str) -> Dict[str, str]:
         page = get_page()
@@ -267,6 +442,10 @@ class ExtractPageTitleTool(Tool):
     inputs = {}
     output_type = "string"
 
+    async def forward(self) -> str:
+        page = _get_page()
+        return await page.title()
+
     def forward(self) -> str:
         page = get_page()
         return page.title()
@@ -276,6 +455,11 @@ class GetCurrentURLTool(Tool):
     description = "Get the current page URL."
     inputs = {}
     output_type = "string"
+
+    async def forward(self) -> str:
+        page = _get_page()
+        return page.url
+
 
     def forward(self) -> str:
         page = get_page()
@@ -287,6 +471,15 @@ class TakeScreenshotTool(Tool):
     inputs = {"path": {"type": "string", "description": "Output file path"}}
     output_type = "any"
 
+    async def forward(self, path: str):
+        page = _get_page()
+        await page.screenshot(path=path)
+        return True
+
+
+# ===========================================================================
+# Recovery tools (placeholders)
+# ===========================================================================
     def forward(self, path: str):
         page = get_page()
         page.screenshot(path=path)
@@ -300,6 +493,10 @@ class RetryActionTool(Tool):
     description = "Placeholder for retrying an action after failure."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "retry_action_placeholder"
+
     def forward(self): return "retry_action_placeholder"
 
 class CaptureFailureScreenshotTool(Tool):
@@ -307,6 +504,10 @@ class CaptureFailureScreenshotTool(Tool):
     description = "Placeholder for capturing failure screenshot."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "capture_failure_screenshot_placeholder"
+
     def forward(self): return "capture_failure_screenshot_placeholder"
 
 class AlternativeSelectorTool(Tool):
@@ -314,6 +515,10 @@ class AlternativeSelectorTool(Tool):
     description = "Placeholder for selecting alternative selector."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "alternative_selector_placeholder"
+
     def forward(self): return "alternative_selector_placeholder"
 
 class RestartBrowserTool(Tool):
@@ -321,6 +526,10 @@ class RestartBrowserTool(Tool):
     description = "Placeholder for restarting the browser."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "restart_browser_placeholder"
+
     def forward(self): return "restart_browser_placeholder"
 
 class ReopenTabTool(Tool):
@@ -328,6 +537,10 @@ class ReopenTabTool(Tool):
     description = "Placeholder for reopening a tab."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "reopen_tab_placeholder"
+
     def forward(self): return "reopen_tab_placeholder"
 
 class GetLastErrorTool(Tool):
@@ -335,6 +548,10 @@ class GetLastErrorTool(Tool):
     description = "Placeholder for returning last error."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "get_last_error_placeholder"
+
     def forward(self): return "get_last_error_placeholder"
 
 class GetLastActionTool(Tool):
@@ -342,6 +559,10 @@ class GetLastActionTool(Tool):
     description = "Placeholder for returning last action."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "get_last_action_placeholder"
+
     def forward(self): return "get_last_action_placeholder"
 
 class GetCurrentPageSnapshotTool(Tool):
@@ -349,6 +570,14 @@ class GetCurrentPageSnapshotTool(Tool):
     description = "Placeholder for returning a page snapshot."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "get_current_page_snapshot_placeholder"
+
+
+# ===========================================================================
+# Debug tools (placeholders)
+# ===========================================================================
     def forward(self): return "get_current_page_snapshot_placeholder"
 
 class ReadConsoleLogsTool(Tool):
@@ -356,6 +585,10 @@ class ReadConsoleLogsTool(Tool):
     description = "Placeholder: read console logs."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "read_console_logs_placeholder"
+
     def forward(self): return "read_console_logs_placeholder"
 
 class ReadNetworkLogsTool(Tool):
@@ -363,6 +596,10 @@ class ReadNetworkLogsTool(Tool):
     description = "Placeholder: read network logs."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "read_network_logs_placeholder"
+
     def forward(self): return "read_network_logs_placeholder"
 
 class InspectDOMTool(Tool):
@@ -370,6 +607,10 @@ class InspectDOMTool(Tool):
     description = "Placeholder: inspect DOM."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "inspect_dom_placeholder"
+
     def forward(self): return "inspect_dom_placeholder"
 
 class AnalyzeStacktraceTool(Tool):
@@ -377,6 +618,10 @@ class AnalyzeStacktraceTool(Tool):
     description = "Placeholder: analyze stack trace."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "analyze_stacktrace_placeholder"
+
     def forward(self): return "analyze_stacktrace_placeholder"
 
 class FindBrokenSelectorTool(Tool):
@@ -384,6 +629,10 @@ class FindBrokenSelectorTool(Tool):
     description = "Placeholder: find broken selector."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "find_broken_selector_placeholder"
+
     def forward(self): return "find_broken_selector_placeholder"
 
 class AnalyzePlaywrightErrorTool(Tool):
@@ -391,6 +640,10 @@ class AnalyzePlaywrightErrorTool(Tool):
     description = "Placeholder: analyze playwright error."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "analyze_playwright_error_placeholder"
+
     def forward(self): return "analyze_playwright_error_placeholder"
 
 class GenerateFixTool(Tool):
@@ -398,6 +651,10 @@ class GenerateFixTool(Tool):
     description = "Placeholder: generate a fix."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "generate_fix_placeholder"
+
     def forward(self): return "generate_fix_placeholder"
 
 class GenerateSelectorTool(Tool):
@@ -405,6 +662,10 @@ class GenerateSelectorTool(Tool):
     description = "Placeholder: generate a selector."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "generate_selector_placeholder"
+
     def forward(self): return "generate_selector_placeholder"
 
 class ExplainErrorTool(Tool):
@@ -412,6 +673,14 @@ class ExplainErrorTool(Tool):
     description = "Placeholder: explain error."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "explain_error_placeholder"
+
+
+# ===========================================================================
+# Critique / Verification tools (placeholders)
+# ===========================================================================
     def forward(self): return "explain_error_placeholder"
 
 class VerifyURLTool(Tool):
@@ -419,6 +688,10 @@ class VerifyURLTool(Tool):
     description = "Placeholder: verify url."
     inputs = {"expected_url": {"type": "string", "description": "Expected URL"}}
     output_type = "string"
+
+    async def forward(self, expected_url: str):
+        return "verify_url_placeholder"
+
     def forward(self, expected_url: str): return "verify_url_placeholder"
 
 class VerifyTitleTool(Tool):
@@ -426,6 +699,10 @@ class VerifyTitleTool(Tool):
     description = "Placeholder: verify title."
     inputs = {"expected_title": {"type": "string", "description": "Expected title"}}
     output_type = "string"
+
+    async def forward(self, expected_title: str):
+        return "verify_title_placeholder"
+
     def forward(self, expected_title: str): return "verify_title_placeholder"
 
 class VerifyTextExistsTool(Tool):
@@ -436,6 +713,10 @@ class VerifyTextExistsTool(Tool):
         "expected_text": {"type": "string", "description": "Expected text"},
     }
     output_type = "string"
+
+    async def forward(self, selector: str, expected_text: str):
+        return "verify_text_exists_placeholder"
+
     def forward(self, selector: str, expected_text: str): return "verify_text_exists_placeholder"
 
 class VerifyElementExistsTool(Tool):
@@ -443,6 +724,10 @@ class VerifyElementExistsTool(Tool):
     description = "Placeholder: verify element exists."
     inputs = {"selector": {"type": "string", "description": "Selector"}}
     output_type = "string"
+
+    async def forward(self, selector: str):
+        return "verify_element_exists_placeholder"
+
     def forward(self, selector: str): return "verify_element_exists_placeholder"
 
 class VerifyPageLoadedTool(Tool):
@@ -450,6 +735,10 @@ class VerifyPageLoadedTool(Tool):
     description = "Placeholder: verify page loaded."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "verify_page_loaded_placeholder"
+
     def forward(self): return "verify_page_loaded_placeholder"
 
 class VerifyTaskCompletionTool(Tool):
@@ -457,6 +746,10 @@ class VerifyTaskCompletionTool(Tool):
     description = "Placeholder: verify task completion."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "verify_task_completion_placeholder"
+
     def forward(self): return "verify_task_completion_placeholder"
 
 class CompareExpectedVsActualTool(Tool):
@@ -464,6 +757,10 @@ class CompareExpectedVsActualTool(Tool):
     description = "Placeholder: compare expected vs actual."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "compare_expected_vs_actual_placeholder"
+
     def forward(self): return "compare_expected_vs_actual_placeholder"
 
 class ValidateExtractedDataTool(Tool):
@@ -471,6 +768,10 @@ class ValidateExtractedDataTool(Tool):
     description = "Placeholder: validate extracted data."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "validate_extracted_data_placeholder"
+
     def forward(self): return "validate_extracted_data_placeholder"
 
 class ValidateOutputQualityTool(Tool):
@@ -478,6 +779,16 @@ class ValidateOutputQualityTool(Tool):
     description = "Placeholder: validate output quality."
     inputs = {}
     output_type = "string"
+
+    async def forward(self):
+        return "validate_output_quality_placeholder"
+
+
+# ===========================================================================
+# Instantiate tools with the variable names orchestration.py expects
+# ===========================================================================
+
+# Navigation
     def forward(self): return "validate_output_quality_placeholder"
 
 
@@ -491,11 +802,15 @@ go_forward = GoForwardTool()
 new_tab = NewTabTool()
 switch_tab = SwitchTabTool()
 close_tab = CloseTabTool()
+
+# Interaction
 click = ClickTool()
 fill = FillTool()
 press = PressTool()
 scroll = ScrollTool()
 hover = HoverTool()
+
+# Extraction
 extract_text = ExtractTextTool()
 extract_links = ExtractLinksTool()
 extract_table = ExtractTableTool()

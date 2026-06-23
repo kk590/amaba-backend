@@ -14,9 +14,6 @@ from datetime import datetime
 import json
 import os
 
-# Import orchestration system
-from orchestration import get_orchestrator, OrchestratorConfig, init_orchestrator
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -24,13 +21,81 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ============================================================================
+# Orchestration Import (PROTECTED)
+# ============================================================================
+# `orchestration.py` pulls in smolagents -> transformers under the hood.
+# A version mismatch between those two packages (e.g. the
+# "is_soundfile_availble" ImportError) raises at IMPORT time, not at
+# startup. Previously this import was unguarded at module scope, so the
+# whole Python process died before FastAPI/uvicorn ever bound to a port -
+# which is exactly why Render reported "No open ports detected": the
+# process was crash-looping, not failing to bind.
+#
+# Wrapping it in try/except means a broken orchestration backend degrades
+# the app to "API-only mode" instead of taking the whole server down.
+ORCHESTRATION_AVAILABLE = False
+get_orchestrator = None
+OrchestratorConfig = None
+init_orchestrator = None
+
+try:
+    from orchestration import get_orchestrator, OrchestratorConfig, init_orchestrator
+    ORCHESTRATION_AVAILABLE = True
+except Exception as e:
+    logger.error(f"Failed to import orchestration module: {e}")
+    logger.error(
+        "This is very likely a smolagents/transformers version mismatch "
+        "(e.g. 'is_soundfile_availble' ImportError). Fix by upgrading "
+        "smolagents to a release that supports your installed transformers "
+        "version: pip install --upgrade smolagents transformers"
+    )
+    logger.error("Server will start in API-only mode (orchestration disabled).")
+
+from contextlib import asynccontextmanager
+
+# ============================================================================
+# Lifespan (replaces deprecated @app.on_event)
+# ============================================================================
+
+@asynccontextmanager
+async def lifespan(application):
+    """Startup / shutdown lifecycle for the FastAPI app."""
+    global orchestrator
+
+    logger.info("=" * 60)
+    logger.info("AMABA Dashboard Backend Starting...")
+    logger.info("=" * 60)
+
+    if ORCHESTRATION_AVAILABLE:
+        try:
+            config = OrchestratorConfig()
+            init_orchestrator(config)
+            orchestrator = get_orchestrator()
+            logger.info("✅ Agent Orchestration System: Initialized")
+        except Exception as e:
+            logger.warning(f"⚠️  Orchestration system failed to initialize: {e}")
+            logger.warning("   Backend will run in API-only mode")
+    else:
+        logger.warning("⚠️  Orchestration module unavailable (import failed at startup)")
+        logger.warning("   Backend will run in API-only mode")
+
+    logger.info("✅ API Server: Running")
+    logger.info("📚 API Docs: /docs")
+    logger.info("🔍 ReDoc: /redoc")
+    logger.info("=" * 60)
+
+    yield  # App is running
+
+    logger.info("AMABA Dashboard Backend Shutting Down...")
+
 # Initialize FastAPI app
 app = FastAPI(
     title="AMABA Dashboard API",
     description="Multi-Agent Autonomous Browser Automation Backend",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan,
 )
-
 # Enable CORS for extension communication
 app.add_middleware(
     CORSMiddleware,
@@ -107,41 +172,8 @@ METRICS = {
     "error_rate": 0.13
 }
 
-# Initialize orchestrator
+# Initialize orchestrator reference (set during lifespan startup)
 orchestrator = None
-
-# ============================================================================
-# Startup Event
-# ============================================================================
-
-@app.on_event("startup")
-async def startup_event():
-    """Initialize when server starts"""
-    global orchestrator
-    
-    logger.info("=" * 60)
-    logger.info("AMABA Dashboard Backend Starting...")
-    logger.info("=" * 60)
-    
-    # Initialize orchestrator
-    try:
-        config = OrchestratorConfig()
-        init_orchestrator(config)
-        orchestrator = get_orchestrator()
-        logger.info("✅ Agent Orchestration System: Initialized")
-    except Exception as e:
-        logger.warning(f"⚠️  Orchestration system failed to initialize: {e}")
-        logger.warning("   Backend will run in API-only mode")
-    
-    logger.info("✅ API Server: Running")
-    logger.info("📚 API Docs: /docs")
-    logger.info("🔍 ReDoc: /redoc")
-    logger.info("=" * 60)
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup when server shuts down"""
-    logger.info("AMABA Dashboard Backend Shutting Down...")
 
 # ============================================================================
 # Health & Status Endpoints
@@ -154,14 +186,15 @@ async def health_check():
         "status": "healthy",
         "version": "1.0.0",
         "timestamp": datetime.now().isoformat(),
-        "orchestration": "active" if orchestrator else "unavailable"
+        "orchestration": "active" if orchestrator else "unavailable",
+        "orchestration_import_ok": ORCHESTRATION_AVAILABLE
     }
 
 @app.get("/api/status")
 async def get_system_status():
     """Get overall system status"""
     active_agents = sum(1 for a in AGENTS_STATE.values() if a["status"] == "active")
-    
+
     return {
         "status": "running",
         "uptime": 123456,
@@ -183,7 +216,7 @@ async def get_system_status():
 async def get_all_agents():
     """Get list of all agents and their status"""
     agents = []
-    
+
     # Get orchestrator agent status if available
     if orchestrator:
         orch_status = orchestrator.get_agent_status()
@@ -195,7 +228,7 @@ async def get_all_agents():
             "last_updated": datetime.now().isoformat(),
             "type": "orchestrator"
         })
-    
+
     # Add other agents
     for agent_id, state in AGENTS_STATE.items():
         if agent_id != "ceo":  # Skip duplicate CEO
@@ -206,7 +239,7 @@ async def get_all_agents():
                 "progress": state["progress"],
                 "last_updated": state["last_updated"]
             })
-    
+
     return {"agents": agents}
 
 @app.get("/api/agents/{agent_id}")
@@ -214,7 +247,7 @@ async def get_agent(agent_id: str):
     """Get specific agent details"""
     if agent_id not in AGENTS_STATE and agent_id != "ceo_orchestrator":
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
-    
+
     if agent_id == "ceo_orchestrator" and orchestrator:
         status = orchestrator.get_agent_status()
         return {
@@ -225,7 +258,7 @@ async def get_agent(agent_id: str):
             "last_updated": datetime.now().isoformat(),
             "type": "orchestrator"
         }
-    
+
     state = AGENTS_STATE.get(agent_id, {})
     return {
         "id": agent_id,
@@ -240,10 +273,10 @@ async def start_agent(agent_id: str):
     """Start an agent"""
     if agent_id not in AGENTS_STATE:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
-    
+
     AGENTS_STATE[agent_id]["status"] = "active"
     AGENTS_STATE[agent_id]["last_updated"] = datetime.now().isoformat()
-    
+
     logger.info(f"Started agent: {agent_id}")
     return {"message": f"Agent {agent_id} started", "status": "success"}
 
@@ -252,11 +285,11 @@ async def stop_agent(agent_id: str):
     """Stop an agent"""
     if agent_id not in AGENTS_STATE:
         raise HTTPException(status_code=404, detail=f"Agent {agent_id} not found")
-    
+
     AGENTS_STATE[agent_id]["status"] = "idle"
     AGENTS_STATE[agent_id]["progress"] = 0
     AGENTS_STATE[agent_id]["last_updated"] = datetime.now().isoformat()
-    
+
     logger.info(f"Stopped agent: {agent_id}")
     return {"message": f"Agent {agent_id} stopped", "status": "success"}
 
@@ -269,7 +302,7 @@ async def get_orchestrator_status():
     """Get orchestrator status"""
     if not orchestrator:
         return {"status": "unavailable", "message": "Orchestration system not initialized"}
-    
+
     status = orchestrator.get_agent_status()
     return {
         "status": "active",
@@ -293,19 +326,19 @@ async def run_orchestration_task(request: OrchestrationTaskRequest):
             status_code=503,
             detail="Orchestration system not available"
         )
-    
+
     try:
         logger.info(f"Running orchestration task: {request.task_description}")
-        
+
         # Execute through orchestrator
         result = orchestrator.run_task(
             request.task_description,
             request.task_id
         )
-        
+
         # Update metrics
         METRICS["tasks_completed"] += 1
-        
+
         return OrchestrationTaskResponse(
             task_id=result.task_id,
             success=result.success,
@@ -314,7 +347,7 @@ async def run_orchestration_task(request: OrchestrationTaskRequest):
             duration=result.duration,
             timestamp=result.timestamp
         )
-        
+
     except Exception as e:
         logger.error(f"Orchestration error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -324,7 +357,7 @@ async def get_orchestrator_history(limit: int = Query(10, ge=1, le=100)):
     """Get orchestrator execution history"""
     if not orchestrator:
         return {"history": [], "total": 0}
-    
+
     history = orchestrator.get_execution_history(limit)
     return {
         "history": history,
@@ -340,9 +373,9 @@ async def get_orchestrator_history(limit: int = Query(10, ge=1, le=100)):
 async def create_task(task: TaskRequest, background_tasks: BackgroundTasks):
     """Create and execute a new task"""
     task_id = f"task_{datetime.now().timestamp()}"
-    
+
     logger.info(f"Created task: {task_id} - {task.task_name}")
-    
+
     return TaskResponse(
         task_id=task_id,
         status="executing",
@@ -480,7 +513,7 @@ if __name__ == "__main__":
     # Get host and port from environment variables (Render compatible)
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", 8000))
-    
+
     logger.info(f"Starting AMABA Dashboard Backend on {host}:{port}")
     uvicorn.run(
         app,
