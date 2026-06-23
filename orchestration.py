@@ -3,7 +3,7 @@ AMABA Multi-Agent Orchestration System
 Manages multiple specialized agents for autonomous browser automation
 """
 
-from smolagents import CodeAgent, ManagedAgent
+from smolagents import CodeAgent
 from smolagents.models import InferenceClientModel
 import logging
 from typing import Optional, Dict, Any
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 # MODELS
 # =========================
 ceo_model = InferenceClientModel(
-    model_id="Qwen/Qwen3-8B-Instruct"
+    model_id="Qwen/Qwen2.5-72B-Instruct"
 )
 browser_model = InferenceClientModel(
     model_id="microsoft/Phi-4-mini-instruct"
@@ -117,11 +117,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
-        self.agents['browser'] = ManagedAgent(
-            browser_manager,
-            name="browser_manager",
-            description="Browser operations"
-        )
+        self.agents['browser'] = browser_manager
 
         # Recovery Manager
         recovery_tools = [retry_action, refresh_page] if TOOLS_AVAILABLE else []
@@ -136,11 +132,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
-        self.agents['recovery'] = ManagedAgent(
-            recovery_manager,
-            name="recovery_manager",
-            description="Recovery operations"
-        )
+        self.agents['recovery'] = recovery_manager
 
         # Debug Manager
         debug_manager = CodeAgent(
@@ -153,11 +145,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
-        self.agents['debug'] = ManagedAgent(
-            debug_manager,
-            name="debug_manager",
-            description="Debug operations"
-        )
+        self.agents['debug'] = debug_manager
 
         # Critique Manager
         critique_tools = [verify_url, verify_text_exists] if TOOLS_AVAILABLE else []
@@ -173,11 +161,7 @@ class AgentOrchestrator:
             """,
             max_steps=self.config.max_steps
         )
-        self.agents['critique'] = ManagedAgent(
-            critique_manager,
-            name="critique_manager",
-            description="Validation operations"
-        )
+        self.agents['critique'] = critique_manager
 
         # CEO Orchestrator
         managed_agents_list = [
@@ -319,7 +303,7 @@ if __name__ == "__main__":
     # Output result
     print(f"\n{'='*60}")
     print(f"Task ID: {result.task_id}")
-    print(f"Status: {'✅ SUCCESS' if result.success else '❌ FAILED'}")
+    print(f"Status: {'[SUCCESS]' if result.success else '[FAILED]'}")
     print(f"Duration: {result.duration:.2f}s")
     if result.error:
         print(f"Error: {result.error}")
