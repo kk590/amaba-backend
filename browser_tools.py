@@ -42,10 +42,7 @@ def _get_page():
 # Navigation tools
 # ===========================================================================
 
-from __future__ import annotations
-
-from typing import Any, Dict, List
-from smolagents import Tool
+from typing import Dict, List
 from playwright.sync_api import sync_playwright, Page, Browser, Playwright, TimeoutError
 import logging
 
